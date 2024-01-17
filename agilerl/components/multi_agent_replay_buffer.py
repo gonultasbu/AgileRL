@@ -51,8 +51,8 @@ class MultiAgentReplayBuffer:
                 # Handle numpy stacking
                 if not isinstance(ts[0], dict):
                     ts = np.stack(ts, axis=0)
-                if len(ts.shape) == 1:
-                    ts = np.expand_dims(ts, axis=1)
+                    if len(ts.shape) == 1:
+                        ts = np.expand_dims(ts, axis=1)
 
                 if field in [
                     "done",
@@ -71,7 +71,21 @@ class MultiAgentReplayBuffer:
                         if self.device is not None:
                             ts = ts.to(self.device)
                     elif isinstance(ts[0], dict):
-                        pass
+                        ts = [
+                            {
+                                "image": torch.from_numpy(t["image"])
+                                .float()
+                                .to(self.device)
+                                if self.device is not None
+                                else torch.from_numpy(t["image"]).float(),
+                                "vector": torch.from_numpy(t["vector"])
+                                .float()
+                                .to(self.device)
+                                if self.device is not None
+                                else torch.from_numpy(t["image"]).float(),
+                            }
+                            for t in ts
+                        ]
 
                 field_dict[agent_id] = ts
             transition[field] = field_dict
