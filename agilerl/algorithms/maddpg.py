@@ -13,6 +13,8 @@ from agilerl.networks.evolvable_mlp import EvolvableMLP
 from agilerl.wrappers.make_evolvable import MakeEvolvable
 from agilerl.wrappers.pettingzoo_wrappers import PettingZooVectorizationParallelWrapper
 
+TensorDict = dict[str, torch.Tensor]
+
 
 class MADDPG:
     """The MADDPG algorithm class. MADDPG paper: https://arxiv.org/abs/1706.02275
@@ -138,7 +140,8 @@ class MADDPG:
             ), "Critic networks must be an nn.Module or None."
         if (actor_networks is not None) != (critic_networks is not None):
             warnings.warn(
-                "Actor and critic network lists must both be supplied to use custom networks. Defaulting to net config."
+                "Actor and critic network lists must both be supplied to use custom"
+                " networks. Defaulting to net config."
             )
         assert isinstance(
             wrap, bool
@@ -359,11 +362,29 @@ class MADDPG:
         # states = {key: np.vstack(value) for key, value in states.items()}
 
         # Convert states to a list of torch tensors
-        states = [torch.from_numpy(state).float() for state in states.values()]
+        if self.arch == "mlp" or self.arch == "cnn":
+            states = [
+                torch.from_numpy(state).float().to(self.device)
+                if self.accelerator is None
+                else torch.from_numpy(state).float()
+                for state in states.values()
+            ]
 
+        if self.arch == "mixed":
+            output_states = []
+            for key, value in states.items():
+                output_states.append(
+                    {
+                        idx: torch.from_numpy(state).float().to(self.device)
+                        if self.accelerator is None
+                        else torch.from_numpy(state).float()
+                        for idx, state in value.items()
+                    }
+                )
+            states = output_states
         # Configure accelerator
-        if self.accelerator is None:
-            states = [state.to(self.device) for state in states]
+        # if self.accelerator is None:
+        #     states = [state.to(self.device) for state in states]
 
         if self.one_hot:
             states = [
@@ -381,13 +402,27 @@ class MADDPG:
         elif self.arch == "cnn":
             states = [state.unsqueeze(2) for state in states]
 
+        elif self.arch == "mixed":
+            for state in states:
+                state["image"] = state["image"].unsqueeze(2)
+                state["vector"] = (
+                    state["vector"].unsqueeze(0)
+                    if len(state["vector"].size()) < 2
+                    else state["vector"]
+                )
+
         action_dict = {}
         for idx, (agent_id, state, actor) in enumerate(zip(agent_ids, states, actors)):
             if random.random() < epsilon:
+                if self.arch == "mixed":
+                    state_size_dim = state['image'].size()[0]
+                else:
+                    state_size_dim = state.size()[0]
                 if self.discrete_actions:
+
                     action = (
                         np.random.dirichlet(
-                            np.ones(self.action_dims[idx]), state.size()[0]
+                            np.ones(self.action_dims[idx]), state_size_dim
                         )
                         .astype("float32")
                         .squeeze()
@@ -395,7 +430,7 @@ class MADDPG:
                 else:
                     action = (
                         (self.max_action[idx][0] - self.min_action[idx][0])
-                        * np.random.rand(state.size()[0], self.action_dims[idx])
+                        * np.random.rand(state_size_dim, self.action_dims[idx])
                         .astype("float32")
                         .squeeze()
                     ) + self.min_action[idx][0]
@@ -552,6 +587,29 @@ class MADDPG:
                     else:
                         next_actions.append(unscaled_actions)
 
+            elif self.arch == "mixed":
+                stacked_states = torch.stack(list(states.values()), dim=2)
+                stacked_actions = torch.cat(list(actions.values()), dim=1)
+                if self.accelerator is not None:
+                    with critic.no_sync():
+                        q_value = critic(stacked_states, stacked_actions)
+                else:
+                    q_value = critic(stacked_states, stacked_actions)
+                next_actions = []
+                for i, agent_id_label in enumerate(self.agent_ids):
+                    unscaled_actions = self.actor_targets[i](
+                        next_states[agent_id_label].unsqueeze(2)
+                    ).detach_()
+                    if not self.discrete_actions:
+                        scaled_actions = torch.where(
+                            unscaled_actions > 0,
+                            unscaled_actions * self.max_action[i][0],
+                            unscaled_actions * -self.min_action[i][0],
+                        )
+                        next_actions.append(scaled_actions)
+                    else:
+                        next_actions.append(unscaled_actions)
+
             if self.arch == "mlp":
                 next_input_combined = torch.cat(
                     list(next_states.values()) + next_actions, 1
@@ -561,6 +619,7 @@ class MADDPG:
                         q_value_next_state = critic_target(next_input_combined)
                 else:
                     q_value_next_state = critic_target(next_input_combined)
+
             elif self.arch == "cnn":
                 stacked_next_states = torch.stack(list(next_states.values()), dim=2)
                 stacked_next_actions = torch.cat(next_actions, dim=1)
@@ -574,6 +633,18 @@ class MADDPG:
                         stacked_next_states, stacked_next_actions
                     )
 
+            elif self.arch == "mixed":
+                stacked_next_states = torch.stack(list(next_states.values()), dim=2)
+                stacked_next_actions = torch.cat(next_actions, dim=1)
+                if self.accelerator is not None:
+                    with critic_target.no_sync():
+                        q_value_next_state = critic_target(
+                            stacked_next_states, stacked_next_actions
+                        )
+                else:
+                    q_value_next_state = critic_target(
+                        stacked_next_states, stacked_next_actions
+                    )
             y_j = (
                 rewards[agent_id]
                 + (1 - dones[agent_id]) * self.gamma * q_value_next_state
@@ -640,6 +711,32 @@ class MADDPG:
                         stacked_states, stacked_detached_actions
                     ).mean()
 
+            elif self.arch == "mixed":
+                if self.accelerator is not None:
+                    with actor.no_sync():
+                        action = actor(states[agent_id].unsqueeze(2))
+                else:
+                    action = actor(states[agent_id].unsqueeze(2))
+                if not self.discrete_actions:
+                    action = torch.where(
+                        action > 0,
+                        action * self.max_action[idx][0],
+                        action * -self.min_action[idx][0],
+                    )
+                detached_actions = copy.deepcopy(actions)
+                detached_actions[agent_id] = action
+                stacked_detached_actions = torch.cat(
+                    list(detached_actions.values()), dim=1
+                )
+                if self.accelerator is not None:
+                    with critic.no_sync():
+                        actor_loss = -critic(
+                            stacked_states, stacked_detached_actions
+                        ).mean()
+                else:
+                    actor_loss = -critic(
+                        stacked_states, stacked_detached_actions
+                    ).mean()
             # actor loss backprop
             actor_optimizer.zero_grad()
             if self.accelerator is not None:
