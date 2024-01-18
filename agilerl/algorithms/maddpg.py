@@ -415,11 +415,10 @@ class MADDPG:
         for idx, (agent_id, state, actor) in enumerate(zip(agent_ids, states, actors)):
             if random.random() < epsilon:
                 if self.arch == "mixed":
-                    state_size_dim = state['image'].size()[0]
+                    state_size_dim = state["image"].size()[0]
                 else:
                     state_size_dim = state.size()[0]
                 if self.discrete_actions:
-
                     action = (
                         np.random.dirichlet(
                             np.ones(self.action_dims[idx]), state_size_dim
@@ -588,7 +587,24 @@ class MADDPG:
                         next_actions.append(unscaled_actions)
 
             elif self.arch == "mixed":
-                stacked_states = torch.stack(list(states.values()), dim=2)
+                stacked_ims = torch.stack(
+                    [
+                        torch.stack(
+                            [state["image"] for state in states[agent_id]], dim=0
+                        )
+                        for agent_id in states.keys()
+                    ],
+                    dim=2,
+                )
+                stacked_vecs = torch.hstack(
+                    [
+                        torch.stack(
+                            [state["vector"] for state in states[agent_id]], dim=0
+                        )
+                        for agent_id in states.keys()
+                    ]
+                )
+                stacked_states = {"image": stacked_ims, "vector": stacked_vecs}
                 stacked_actions = torch.cat(list(actions.values()), dim=1)
                 if self.accelerator is not None:
                     with critic.no_sync():
@@ -634,7 +650,35 @@ class MADDPG:
                     )
 
             elif self.arch == "mixed":
-                stacked_next_states = torch.stack(list(next_states.values()), dim=2)
+                stacked_next_ims = torch.stack(
+                    [
+                        torch.stack(
+                            [
+                                next_state["image"]
+                                for next_state in next_states[agent_id]
+                            ],
+                            dim=0,
+                        )
+                        for agent_id in states.keys()
+                    ],
+                    dim=2,
+                )
+                stacked_next_vecs = torch.hstack(
+                    [
+                        torch.stack(
+                            [
+                                next_state["vector"]
+                                for next_state in next_states[agent_id]
+                            ],
+                            dim=0,
+                        )
+                        for agent_id in states.keys()
+                    ]
+                )
+                stacked_next_states = {
+                    "image": stacked_next_ims,
+                    "vector": stacked_next_vecs,
+                }
                 stacked_next_actions = torch.cat(next_actions, dim=1)
                 if self.accelerator is not None:
                     with critic_target.no_sync():

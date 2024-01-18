@@ -98,6 +98,8 @@ class EvolvableCNN(nn.Module):
         normalize=True,
         device="cpu",
         accelerator=None,
+        mixed_input=False,
+        mixed_input_second_size=0,
     ):
         super().__init__()
         assert len(kernel_size) == len(
@@ -110,17 +112,19 @@ class EvolvableCNN(nn.Module):
         assert (
             len(hidden_size) > 0
         ), "Fully connected layer must contain at least one hidden layer."
-        assert (
-            num_actions > 0
-        ), "'num_actions' cannot be less than or equal to zero, please enter a valid integer."
+        assert num_actions > 0, (
+            "'num_actions' cannot be less than or equal to zero, please enter a valid"
+            " integer."
+        )
         if multi:
             assert (
                 n_agents is not None
             ), "'multi' set as True, specify the number of agents (n_agents) too."
         if n_agents is not None:
-            assert (
-                multi
-            ), f"'n_agents' has been set to {n_agents} implying a multi-agent system, please also specify 'multi' as True."
+            assert multi, (
+                f"'n_agents' has been set to {n_agents} implying a multi-agent system,"
+                " please also specify 'multi' as True."
+            )
 
         assert (
             min_hidden_layers < max_hidden_layers
@@ -162,7 +166,8 @@ class EvolvableCNN(nn.Module):
         self.accelerator = accelerator
         self.multi = multi
         self.n_agents = n_agents
-
+        self.mixed_input = mixed_input
+        self.mixed_input_second_size = mixed_input_second_size
         self.net = self.create_nets()
         self.feature_net, self.value_net, self.advantage_net = self.create_nets()
 
@@ -335,6 +340,8 @@ class EvolvableCNN(nn.Module):
 
         if self.critic:
             input_size += self.num_actions
+        if self.mixed_input:
+            input_size += self.mixed_input_second_size
 
         if self.rainbow:
             value_net = self.create_mlp(
@@ -411,6 +418,10 @@ class EvolvableCNN(nn.Module):
         :param q: Return Q value if using rainbow, defaults to True
         :type q: bool, optional
         """
+        if self.mixed_input:
+            xa = x["vector"]
+            x = x["image"]
+            
         if not isinstance(x, torch.Tensor):
             x = torch.FloatTensor(x)
             x = x.to(self.device)
@@ -425,7 +436,8 @@ class EvolvableCNN(nn.Module):
 
         x = self.feature_net(x)
         x = x.reshape(batch_size, -1)
-
+        if self.mixed_input:
+            x = torch.cat([x, xa], dim=1)
         if self.critic:
             x = torch.cat([x, xc], dim=1)
 
