@@ -612,9 +612,20 @@ class MADDPG:
                 else:
                     q_value = critic(stacked_states, stacked_actions)
                 next_actions = []
+                input_ns = {
+                    agent_id: {
+                        "image": torch.stack(
+                            [state["image"] for state in next_states[agent_id]], dim=0
+                        ).unsqueeze(2),
+                        "vector": torch.stack(
+                            [state["vector"] for state in next_states[agent_id]], dim=0
+                        ),
+                    }
+                    for agent_id, agent_ns in next_states.items()
+                }
                 for i, agent_id_label in enumerate(self.agent_ids):
                     unscaled_actions = self.actor_targets[i](
-                        next_states[agent_id_label].unsqueeze(2)
+                        input_ns[agent_id_label]
                     ).detach_()
                     if not self.discrete_actions:
                         scaled_actions = torch.where(
@@ -756,11 +767,22 @@ class MADDPG:
                     ).mean()
 
             elif self.arch == "mixed":
+                input_s = {
+                    agent_id: {
+                        "image": torch.stack(
+                            [state["image"] for state in states[agent_id]], dim=0
+                        ).unsqueeze(2),
+                        "vector": torch.stack(
+                            [state["vector"] for state in states[agent_id]], dim=0
+                        ),
+                    }
+                    for agent_id, agent_ns in next_states.items()
+                }
                 if self.accelerator is not None:
                     with actor.no_sync():
-                        action = actor(states[agent_id].unsqueeze(2))
+                        action = actor(input_s)
                 else:
-                    action = actor(states[agent_id].unsqueeze(2))
+                    action = actor(input_s[agent_id])
                 if not self.discrete_actions:
                     action = torch.where(
                         action > 0,
