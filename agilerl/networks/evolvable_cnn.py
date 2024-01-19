@@ -418,10 +418,6 @@ class EvolvableCNN(nn.Module):
         :param q: Return Q value if using rainbow, defaults to True
         :type q: bool, optional
         """
-        if self.mixed_input:
-            xa = x["vector"]
-            x = x["image"]
-            
         if not isinstance(x, torch.Tensor):
             x = torch.FloatTensor(x)
             x = x.to(self.device)
@@ -436,9 +432,7 @@ class EvolvableCNN(nn.Module):
 
         x = self.feature_net(x)
         x = x.reshape(batch_size, -1)
-        if self.mixed_input:
-            x = torch.cat([x, xa], dim=1)
-        if self.critic:
+        if (self.critic or self.mixed_input):
             x = torch.cat([x, xc], dim=1)
 
         value = self.value_net(x)

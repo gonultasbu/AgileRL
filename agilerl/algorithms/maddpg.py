@@ -370,18 +370,13 @@ class MADDPG:
                 for state in states.values()
             ]
 
-        if self.arch == "mixed":
-            output_states = []
+        elif self.arch == "mixed":
+            im_states = []
+            vec_states = []
             for key, value in states.items():
-                output_states.append(
-                    {
-                        idx: torch.from_numpy(state).float().to(self.device)
-                        if self.accelerator is None
-                        else torch.from_numpy(state).float()
-                        for idx, state in value.items()
-                    }
-                )
-            states = output_states
+                im_states.append(torch.from_numpy(value[0]).float().to(self.device))
+                vec_states.append(torch.from_numpy(value[1]).float().to(self.device))
+            # states = [im_states, vec_states]
         # Configure accelerator
         # if self.accelerator is None:
         #     states = [state.to(self.device) for state in states]
@@ -403,19 +398,19 @@ class MADDPG:
             states = [state.unsqueeze(2) for state in states]
 
         elif self.arch == "mixed":
-            for state in states:
-                state["image"] = state["image"].unsqueeze(2)
-                state["vector"] = (
-                    state["vector"].unsqueeze(0)
-                    if len(state["vector"].size()) < 2
-                    else state["vector"]
+            for idx, im_state in enumerate(im_states):
+                im_states[idx] = im_state.unsqueeze(2)
+                vec_states[idx] = (
+                    vec_states[idx].unsqueeze(0)
+                    if len(vec_states[idx].size()) < 2
+                    else vec_states[idx]
                 )
-
+        states = [[im_states[idx], vec_states[idx]] for idx in range(len(im_states))]
         action_dict = {}
         for idx, (agent_id, state, actor) in enumerate(zip(agent_ids, states, actors)):
             if random.random() < epsilon:
                 if self.arch == "mixed":
-                    state_size_dim = state["image"].size()[0]
+                    state_size_dim = state[0].size()[0]
                 else:
                     state_size_dim = state.size()[0]
                 if self.discrete_actions:
@@ -435,12 +430,20 @@ class MADDPG:
                     ) + self.min_action[idx][0]
             else:
                 actor.eval()
-                if self.accelerator is not None:
-                    with actor.no_sync(), torch.no_grad():
-                        action_values = actor(state)
+                if self.arch == "mixed":
+                    if self.accelerator is not None:
+                        with actor.no_sync(), torch.no_grad():
+                            action_values = actor(state[0], state[1])
+                    else:
+                        with torch.no_grad():
+                            action_values = actor(state[0], state[1])
                 else:
-                    with torch.no_grad():
-                        action_values = actor(state)
+                    if self.accelerator is not None:
+                        with actor.no_sync(), torch.no_grad():
+                            action_values = actor(state)
+                    else:
+                        with torch.no_grad():
+                            action_values = actor(state)
                 actor.train()
                 if self.discrete_actions:
                     action = action_values.cpu().data.numpy().squeeze()
