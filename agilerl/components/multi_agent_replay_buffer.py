@@ -1,5 +1,6 @@
 import random
 from collections import deque, namedtuple
+
 import numpy as np
 import torch
 
@@ -49,8 +50,7 @@ class MultiAgentReplayBuffer:
                 ts = [getattr(e, field)[agent_id] for e in experiences if e is not None]
 
                 # Handle numpy stacking
-                if not isinstance(ts[0], dict):
-                    ts = np.stack(ts, axis=0)
+                ts = np.stack(ts, axis=0)
                 if len(ts.shape) == 1:
                     ts = np.expand_dims(ts, axis=1)
 
@@ -65,13 +65,10 @@ class MultiAgentReplayBuffer:
 
                 if not np_array:
                     # Handle torch tensor creation
-                    if isinstance(ts, np.ndarray):
-                        ts = torch.from_numpy(ts).float()
-                        # Place on device
-                        if self.device is not None:
-                            ts = ts.to(self.device)
-                    elif isinstance(ts[0], dict):
-                        pass
+                    ts = torch.from_numpy(ts).float()
+                    # Place on device
+                    if self.device is not None:
+                        ts = ts.to(self.device)
 
                 field_dict[agent_id] = ts
             transition[field] = field_dict
