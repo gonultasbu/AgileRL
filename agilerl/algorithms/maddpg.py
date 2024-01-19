@@ -519,7 +519,18 @@ class MADDPG:
                 self.critic_optimizers,
             )
         ):
-            states, actions, rewards, next_states, dones = experiences
+            if self.arch == "mixed":
+                (
+                    im_states,
+                    vec_states,
+                    actions,
+                    rewards,
+                    next_im_states,
+                    next_vec_states,
+                    dones,
+                ) = experiences
+            else:
+                states, actions, rewards, next_states, dones = experiences
 
             if self.one_hot:
                 states = {
@@ -590,45 +601,25 @@ class MADDPG:
                         next_actions.append(unscaled_actions)
 
             elif self.arch == "mixed":
-                stacked_ims = torch.stack(
-                    [
-                        torch.stack(
-                            [state["image"] for state in states[agent_id]], dim=0
-                        )
-                        for agent_id in states.keys()
-                    ],
-                    dim=2,
-                )
-                stacked_vecs = torch.hstack(
-                    [
-                        torch.stack(
-                            [state["vector"] for state in states[agent_id]], dim=0
-                        )
-                        for agent_id in states.keys()
-                    ]
-                )
-                stacked_states = {"image": stacked_ims, "vector": stacked_vecs}
+                stacked_ims = torch.stack(list(im_states.values()), dim=2)
+                stacked_vecs = torch.cat(list(vec_states.values()), dim=1)
                 stacked_actions = torch.cat(list(actions.values()), dim=1)
                 if self.accelerator is not None:
                     with critic.no_sync():
-                        q_value = critic(stacked_states, stacked_actions)
+                        q_value = critic(
+                            stacked_ims,
+                            torch.cat((stacked_vecs, stacked_actions), dim=1),
+                        )
                 else:
-                    q_value = critic(stacked_states, stacked_actions)
+                    q_value = critic(
+                        stacked_ims,
+                        torch.cat((stacked_vecs, stacked_actions), dim=1),
+                    )
                 next_actions = []
-                input_ns = {
-                    agent_id: {
-                        "image": torch.stack(
-                            [state["image"] for state in next_states[agent_id]], dim=0
-                        ).unsqueeze(2),
-                        "vector": torch.stack(
-                            [state["vector"] for state in next_states[agent_id]], dim=0
-                        ),
-                    }
-                    for agent_id, agent_ns in next_states.items()
-                }
                 for i, agent_id_label in enumerate(self.agent_ids):
                     unscaled_actions = self.actor_targets[i](
-                        input_ns[agent_id_label]
+                        next_im_states[agent_id_label].unsqueeze(2),
+                        next_vec_states[agent_id_label],
                     ).detach_()
                     if not self.discrete_actions:
                         scaled_actions = torch.where(
@@ -664,44 +655,19 @@ class MADDPG:
                     )
 
             elif self.arch == "mixed":
-                stacked_next_ims = torch.stack(
-                    [
-                        torch.stack(
-                            [
-                                next_state["image"]
-                                for next_state in next_states[agent_id]
-                            ],
-                            dim=0,
-                        )
-                        for agent_id in states.keys()
-                    ],
-                    dim=2,
-                )
-                stacked_next_vecs = torch.hstack(
-                    [
-                        torch.stack(
-                            [
-                                next_state["vector"]
-                                for next_state in next_states[agent_id]
-                            ],
-                            dim=0,
-                        )
-                        for agent_id in states.keys()
-                    ]
-                )
-                stacked_next_states = {
-                    "image": stacked_next_ims,
-                    "vector": stacked_next_vecs,
-                }
+                stacked_next_ims = torch.stack(list(next_im_states.values()), dim=2)
+                stacked_next_vecs = torch.cat(list(next_vec_states.values()), dim=1)
                 stacked_next_actions = torch.cat(next_actions, dim=1)
                 if self.accelerator is not None:
                     with critic_target.no_sync():
                         q_value_next_state = critic_target(
-                            stacked_next_states, stacked_next_actions
+                            stacked_next_ims,
+                            torch.cat((stacked_next_vecs, stacked_next_actions), dim=1),
                         )
                 else:
                     q_value_next_state = critic_target(
-                        stacked_next_states, stacked_next_actions
+                        stacked_next_ims,
+                        torch.cat((stacked_next_vecs, stacked_next_actions), dim=1),
                     )
             y_j = (
                 rewards[agent_id]
@@ -770,22 +736,17 @@ class MADDPG:
                     ).mean()
 
             elif self.arch == "mixed":
-                input_s = {
-                    agent_id: {
-                        "image": torch.stack(
-                            [state["image"] for state in states[agent_id]], dim=0
-                        ).unsqueeze(2),
-                        "vector": torch.stack(
-                            [state["vector"] for state in states[agent_id]], dim=0
-                        ),
-                    }
-                    for agent_id, agent_ns in next_states.items()
-                }
                 if self.accelerator is not None:
                     with actor.no_sync():
-                        action = actor(input_s)
+                        action = actor(
+                            im_states[agent_id_label].unsqueeze(2),
+                            vec_states[agent_id_label],
+                        )
                 else:
-                    action = actor(input_s[agent_id])
+                    action = actor(
+                        im_states[agent_id_label].unsqueeze(2),
+                        vec_states[agent_id_label],
+                    )
                 if not self.discrete_actions:
                     action = torch.where(
                         action > 0,
@@ -800,11 +761,13 @@ class MADDPG:
                 if self.accelerator is not None:
                     with critic.no_sync():
                         actor_loss = -critic(
-                            stacked_states, stacked_detached_actions
+                            stacked_ims,
+                            torch.cat((stacked_vecs, stacked_detached_actions), dim=1),
                         ).mean()
                 else:
                     actor_loss = -critic(
-                        stacked_states, stacked_detached_actions
+                        stacked_ims,
+                        torch.cat((stacked_vecs, stacked_detached_actions), dim=1),
                     ).mean()
             # actor loss backprop
             actor_optimizer.zero_grad()
