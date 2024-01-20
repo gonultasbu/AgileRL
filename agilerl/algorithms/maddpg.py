@@ -363,12 +363,11 @@ class MADDPG:
 
         # Convert states to a list of torch tensors
         if self.arch == "mlp" or self.arch == "cnn":
-            states = [
-                torch.from_numpy(state).float().to(self.device)
-                if self.accelerator is None
-                else torch.from_numpy(state).float()
-                for state in states.values()
-            ]
+            states = [torch.from_numpy(state).float() for state in states.values()]
+
+            # Configure accelerator
+            if self.accelerator is None:
+                states = [state.to(self.device) for state in states]
 
         elif self.arch == "mixed":
             im_states = []
