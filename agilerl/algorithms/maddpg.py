@@ -405,7 +405,9 @@ class MADDPG:
                     if len(vec_states[idx].size()) < 2
                     else vec_states[idx]
                 )
-        states = [[im_states[idx], vec_states[idx]] for idx in range(len(im_states))]
+            states = [
+                [im_states[idx], vec_states[idx]] for idx in range(len(im_states))
+            ]
         action_dict = {}
         for idx, (agent_id, state, actor) in enumerate(zip(agent_ids, states, actors)):
             if random.random() < epsilon:
@@ -783,7 +785,8 @@ class MADDPG:
             self.softUpdate(actor, actor_target)
             self.softUpdate(critic, critic_target)
 
-        return actor_loss.item(), critic_loss.item()
+        # return actor_loss.item(), critic_loss.item()
+        return
 
     def softUpdate(self, net, target):
         """Soft updates target network."""
