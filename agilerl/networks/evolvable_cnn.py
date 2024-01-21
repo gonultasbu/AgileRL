@@ -101,6 +101,7 @@ class EvolvableCNN(nn.Module):
         mixed_input=False,
         mixed_input_second_size=0,
         pooling=False,
+        instance_norm=False,
     ):
         super().__init__()
         assert len(kernel_size) == len(
@@ -169,9 +170,10 @@ class EvolvableCNN(nn.Module):
         self.n_agents = n_agents
         self.mixed_input = mixed_input
         self.mixed_input_second_size = mixed_input_second_size
+        self.pooling = pooling
+        self.instance_norm = instance_norm
         self.net = self.create_nets()
         self.feature_net, self.value_net, self.advantage_net = self.create_nets()
-        self.pooling = pooling
 
     def get_activation(self, activation_names):
         """Returns activation function for corresponding activation name.
@@ -274,6 +276,14 @@ class EvolvableCNN(nn.Module):
                         net_dict[f"{name}_layer_norm_{str(l_no)}"] = nn.BatchNorm3d(
                             channel_size[l_no]
                         )
+                    # if self.pooling:
+                    #     net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
+                    #         kernel_size=(1,1,3)
+                    #     )
+                    if self.instance_norm:
+                        net_dict[
+                            f"{name}_instance_norm_{str(l_no)}"
+                        ] = nn.InstanceNorm3d(num_features=channel_size[l_no])
                     net_dict[f"{name}_activation_{str(l_no)}"] = self.get_activation(
                         self.cnn_activation
                     )
@@ -291,9 +301,6 @@ class EvolvableCNN(nn.Module):
                 net_dict[f"{name}_pooling_0"] = nn.MaxPool2d(kernel_size=2, stride=2)
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
 
-            
-                
-            
             if len(channel_size) > 1:
                 for l_no in range(1, len(channel_size)):
                     net_dict[f"{name}_conv_layer_{str(l_no)}"] = nn.Conv2d(
@@ -439,7 +446,7 @@ class EvolvableCNN(nn.Module):
 
         x = self.feature_net(x)
         x = x.reshape(batch_size, -1)
-        if (self.critic or self.mixed_input):
+        if self.critic or self.mixed_input:
             x = torch.cat([x, xc], dim=1)
 
         value = self.value_net(x)
