@@ -363,7 +363,7 @@ class MADDPG:
 
         # Convert states to a list of torch tensors
         if self.arch == "mlp" or self.arch == "cnn":
-            states = [torch.from_numpy(state).float() for state in states.values()]
+            states = [torch.from_numpy(np.stack(state)).float() for state in states.values()]
 
             # Configure accelerator
             if self.accelerator is None:
@@ -372,14 +372,9 @@ class MADDPG:
         elif self.arch == "mixed":
             im_states = []
             vec_states = []
-            for key, value in states.items():
-                im_states.append(torch.from_numpy(value[0]).float().to(self.device))
-                vec_states.append(torch.from_numpy(value[1]).float().to(self.device))
-            # states = [im_states, vec_states]
-        # Configure accelerator
-        # if self.accelerator is None:
-        #     states = [state.to(self.device) for state in states]
-
+            for state in states.values():
+                im_states.append(torch.from_numpy(np.stack([s_2[0] for s_2 in state])).float().to(self.device))
+                vec_states.append(torch.from_numpy(np.stack([s_2[1] for s_2 in state])).float().to(self.device))
         if self.one_hot:
             states = [
                 nn.functional.one_hot(state.long(), num_classes=state_dim[0])

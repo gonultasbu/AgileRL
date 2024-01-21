@@ -213,7 +213,6 @@ class SubprocVecEnv(VecEnv):
 
         for agent_idx, possible_agent in enumerate(self.env.possible_agents):
             for op_dict in [
-                ret_obs_dict,
                 ret_rews_dict,
                 ret_dones_dict,
                 ret_truncs_dict,
@@ -246,11 +245,7 @@ class SubprocVecEnv(VecEnv):
                 ret_obs_dict[possible_agent].append(obs[env_idx][agent_idx])
                 ret_infos_dict[possible_agent].append(infos[env_idx][agent_idx])
         for agent_idx, possible_agent in enumerate(self.env.possible_agents):
-            for op_dict in [
-                ret_obs_dict,
-                ret_infos_dict,
-            ]:
-                op_dict[possible_agent] = np.stack(op_dict[possible_agent])
+            ret_infos_dict[possible_agent] = np.stack(ret_infos_dict[possible_agent])
         return (ret_obs_dict, ret_infos_dict)
 
     def render(self):
