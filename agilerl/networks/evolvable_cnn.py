@@ -100,6 +100,7 @@ class EvolvableCNN(nn.Module):
         accelerator=None,
         mixed_input=False,
         mixed_input_second_size=0,
+        pooling=False,
     ):
         super().__init__()
         assert len(kernel_size) == len(
@@ -170,6 +171,7 @@ class EvolvableCNN(nn.Module):
         self.mixed_input_second_size = mixed_input_second_size
         self.net = self.create_nets()
         self.feature_net, self.value_net, self.advantage_net = self.create_nets()
+        self.pooling = pooling
 
     def get_activation(self, activation_names):
         """Returns activation function for corresponding activation name.
@@ -285,8 +287,13 @@ class EvolvableCNN(nn.Module):
             )
             if self.layer_norm:
                 net_dict[f"{name}_layer_norm_0"] = nn.BatchNorm2d(channel_size[0])
+            if self.pooling:
+                net_dict[f"{name}_pooling_0"] = nn.MaxPool2d(kernel_size=2, stride=2)
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
 
+            
+                
+            
             if len(channel_size) > 1:
                 for l_no in range(1, len(channel_size)):
                     net_dict[f"{name}_conv_layer_{str(l_no)}"] = nn.Conv2d(
