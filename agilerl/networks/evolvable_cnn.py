@@ -278,7 +278,7 @@ class EvolvableCNN(nn.Module):
                         )
                     if (self.pooling) and ((l_no + 1) % 2 == 0):
                         net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
-                            kernel_size=(1, 3, 3)
+                            kernel_size=(1, 3, 3), stride=2
                         )
                     if self.instance_norm:
                         net_dict[
