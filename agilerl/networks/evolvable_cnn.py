@@ -502,6 +502,10 @@ class EvolvableCNN(nn.Module):
             "rainbow": self.rainbow,
             "device": self.device,
             "accelerator": self.accelerator,
+            "mixed_input":self.mixed_input,
+            "mixed_input_second_size":self.mixed_input_second_size,
+            "pooling":self.pooling,
+            "instance_norm":self.instance_norm,
         }
         return init_dict
 

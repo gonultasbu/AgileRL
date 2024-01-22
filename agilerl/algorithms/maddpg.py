@@ -363,7 +363,9 @@ class MADDPG:
 
         # Convert states to a list of torch tensors
         if self.arch == "mlp" or self.arch == "cnn":
-            states = [torch.from_numpy(np.stack(state)).float() for state in states.values()]
+            states = [
+                torch.from_numpy(np.stack(state)).float() for state in states.values()
+            ]
 
             # Configure accelerator
             if self.accelerator is None:
@@ -373,8 +375,16 @@ class MADDPG:
             im_states = []
             vec_states = []
             for state in states.values():
-                im_states.append(torch.from_numpy(np.stack([s_2[0] for s_2 in state])).float().to(self.device))
-                vec_states.append(torch.from_numpy(np.stack([s_2[1] for s_2 in state])).float().to(self.device))
+                im_states.append(
+                    torch.from_numpy(np.stack([s_2[0] for s_2 in state]))
+                    .float()
+                    .to(self.device)
+                )
+                vec_states.append(
+                    torch.from_numpy(np.stack([s_2[1] for s_2 in state]))
+                    .float()
+                    .to(self.device)
+                )
         if self.one_hot:
             states = [
                 nn.functional.one_hot(state.long(), num_classes=state_dim[0])
@@ -1054,7 +1064,7 @@ class MADDPG:
             pickle_module=dill,
         )
 
-    def loadCheckpoint(self, path):
+    def loadCheckpoint(self, path, mixed=False):
         """Loads saved agent properties and network weights from checkpoint.
 
         :param path: Location to load checkpoint from
@@ -1062,7 +1072,26 @@ class MADDPG:
         """
         checkpoint = torch.load(path, pickle_module=dill)
         self.net_config = checkpoint["net_config"]
-        if self.net_config is not None:
+
+        if mixed:
+            self.actors = [
+                EvolvableCNN(**checkpoint["actors_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+            self.actor_targets = [
+                EvolvableCNN(**checkpoint["actor_targets_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+            self.critics = [
+                EvolvableCNN(**checkpoint["critics_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+            self.critic_targets = [
+                EvolvableCNN(**checkpoint["critic_targets_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+
+        elif self.net_config is not None:
             self.arch = checkpoint["net_config"]["arch"]
             if self.arch == "mlp":
                 self.actors = [
