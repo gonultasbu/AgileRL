@@ -276,10 +276,10 @@ class EvolvableCNN(nn.Module):
                         net_dict[f"{name}_layer_norm_{str(l_no)}"] = nn.BatchNorm3d(
                             channel_size[l_no]
                         )
-                    # if self.pooling:
-                    #     net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
-                    #         kernel_size=(1,1,3)
-                    #     )
+                    if (self.pooling) and ((l_no + 1) % 2 == 0):
+                        net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
+                            kernel_size=(1, 3, 3)
+                        )
                     if self.instance_norm:
                         net_dict[
                             f"{name}_instance_norm_{str(l_no)}"
