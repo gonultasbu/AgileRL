@@ -263,7 +263,11 @@ class EvolvableCNN(nn.Module):
             if self.layer_norm:
                 net_dict[f"{name}_layer_norm_0"] = nn.BatchNorm3d(channel_size[0])
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
-
+            if self.pooling:
+                net_dict[f"{name}_pooling_0"] = nn.MaxPool3d(
+                    kernel_size=(1, 3, 3),
+                    stride=2,
+                )
             if len(channel_size) > 1:
                 for l_no in range(1, len(channel_size)):
                     net_dict[f"{name}_conv_layer_{str(l_no)}"] = nn.Conv3d(
@@ -276,7 +280,7 @@ class EvolvableCNN(nn.Module):
                         net_dict[f"{name}_layer_norm_{str(l_no)}"] = nn.BatchNorm3d(
                             channel_size[l_no]
                         )
-                    if (self.pooling) and ((l_no + 1) % 2 == 0):
+                    if self.pooling:
                         net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
                             kernel_size=(1, 3, 3), stride=2
                         )
@@ -297,8 +301,8 @@ class EvolvableCNN(nn.Module):
             )
             if self.layer_norm:
                 net_dict[f"{name}_layer_norm_0"] = nn.BatchNorm2d(channel_size[0])
-            if self.pooling:
-                net_dict[f"{name}_pooling_0"] = nn.MaxPool2d(kernel_size=2, stride=2)
+            # if self.pooling:
+            #     net_dict[f"{name}_pooling_0"] = nn.MaxPool2d(kernel_size=2, stride=2)
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
 
             if len(channel_size) > 1:
@@ -502,10 +506,10 @@ class EvolvableCNN(nn.Module):
             "rainbow": self.rainbow,
             "device": self.device,
             "accelerator": self.accelerator,
-            "mixed_input":self.mixed_input,
-            "mixed_input_second_size":self.mixed_input_second_size,
-            "pooling":self.pooling,
-            "instance_norm":self.instance_norm,
+            "mixed_input": self.mixed_input,
+            "mixed_input_second_size": self.mixed_input_second_size,
+            "pooling": self.pooling,
+            "instance_norm": self.instance_norm,
         }
         return init_dict
 
