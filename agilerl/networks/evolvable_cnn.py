@@ -102,6 +102,7 @@ class EvolvableCNN(nn.Module):
         mixed_input_second_size=0,
         pooling=False,
         instance_norm=False,
+        output_vanish=False,
     ):
         super().__init__()
         assert len(kernel_size) == len(
@@ -174,6 +175,7 @@ class EvolvableCNN(nn.Module):
         self.instance_norm = instance_norm
         self.net = self.create_nets()
         self.feature_net, self.value_net, self.advantage_net = self.create_nets()
+        self.output_vanish = output_vanish
 
     def get_activation(self, activation_names):
         """Returns activation function for corresponding activation name.
@@ -240,6 +242,10 @@ class EvolvableCNN(nn.Module):
             output_layer = NoisyLinear(hidden_size[-1], output_size)
         else:
             output_layer = nn.Linear(hidden_size[-1], output_size)
+
+        if self.output_vanish:
+            output_layer.weight.data.mul_(0.1)
+            output_layer.bias.data.mul_(0.1)
         net_dict[f"{name}_linear_layer_output"] = output_layer
         if output_activation is not None:
             net_dict[f"{name}_activation_output"] = self.get_activation(
@@ -510,6 +516,7 @@ class EvolvableCNN(nn.Module):
             "mixed_input_second_size": self.mixed_input_second_size,
             "pooling": self.pooling,
             "instance_norm": self.instance_norm,
+            "output_vanish": self.output_vanish,
         }
         return init_dict
 
