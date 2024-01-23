@@ -173,9 +173,9 @@ class EvolvableCNN(nn.Module):
         self.mixed_input_second_size = mixed_input_second_size
         self.pooling = pooling
         self.instance_norm = instance_norm
+        self.output_vanish = output_vanish
         self.net = self.create_nets()
         self.feature_net, self.value_net, self.advantage_net = self.create_nets()
-        self.output_vanish = output_vanish
 
     def get_activation(self, activation_names):
         """Returns activation function for corresponding activation name.
