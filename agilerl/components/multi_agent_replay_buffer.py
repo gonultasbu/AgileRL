@@ -47,12 +47,14 @@ class MultiAgentReplayBuffer:
         for field in self.field_names:
             field_dict = {}
             for agent_id in self.agent_ids:
-                ts = [getattr(e, field)[agent_id] for e in experiences if e is not None]
+                ts = [
+                    np.expand_dims(getattr(e, field)[agent_id], axis=0)
+                    for e in experiences
+                    if e is not None
+                ]
 
                 # Handle numpy stacking
-                ts = np.stack(ts, axis=0)
-                if len(ts.shape) == 1:
-                    ts = np.expand_dims(ts, axis=1)
+                ts = np.vstack(ts)
 
                 if field in [
                     "done",
@@ -66,10 +68,9 @@ class MultiAgentReplayBuffer:
                 if not np_array:
                     # Handle torch tensor creation
                     ts = torch.from_numpy(ts).float()
-                    if self.device == "cuda":
-                        ts = ts.cuda()
+
                     # Place on device
-                    elif self.device is not None:
+                    if self.device is not None:
                         ts = ts.to(self.device)
 
                 field_dict[agent_id] = ts
