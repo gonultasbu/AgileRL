@@ -450,7 +450,8 @@ class EvolvableCNN(nn.Module):
             x = x.type(torch.float32)
 
         batch_size = x.size(0)
-
+        if self.mixed_input: # Zero the CNN output for debugging purposes.
+            x = torch.zeros_like(x)
         if self.normalize:
             x = x / 255.0
 
