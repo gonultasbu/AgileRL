@@ -66,8 +66,10 @@ class MultiAgentReplayBuffer:
                 if not np_array:
                     # Handle torch tensor creation
                     ts = torch.from_numpy(ts).float()
+                    if self.device == "cuda":
+                        ts = ts.cuda()
                     # Place on device
-                    if self.device is not None:
+                    elif self.device is not None:
                         ts = ts.to(self.device)
 
                 field_dict[agent_id] = ts
