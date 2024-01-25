@@ -745,13 +745,13 @@ class MADDPG:
                 if self.accelerator is not None:
                     with actor.no_sync():
                         action = actor(
-                            im_states[agent_id_label].unsqueeze(2),
-                            vec_states[agent_id_label],
+                            im_states[agent_id].unsqueeze(2),
+                            vec_states[agent_id],
                         )
                 else:
                     action = actor(
-                        im_states[agent_id_label].unsqueeze(2),
-                        vec_states[agent_id_label],
+                        im_states[agent_id].unsqueeze(2),
+                        vec_states[agent_id],
                     )
                 if not self.discrete_actions:
                     action = torch.where(
