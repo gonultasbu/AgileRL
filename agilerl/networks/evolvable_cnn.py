@@ -453,9 +453,11 @@ class EvolvableCNN(nn.Module):
 
         if self.normalize:
             x = x / 255.0
-
-        x = self.feature_net(x)
-        x = x.reshape(batch_size, -1)
+        if self.mixed_input:
+            x = torch.zeros(([batch_size, 4]), device=self.device, dtype=torch.float32)
+        else:
+            x = self.feature_net(x)
+            x = x.reshape(batch_size, -1)
         if self.critic or self.mixed_input:
             x = torch.cat([x, xc], dim=1)
 
