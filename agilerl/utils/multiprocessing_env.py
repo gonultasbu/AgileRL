@@ -33,7 +33,7 @@ def worker(remote, parent_remote, env_fn_wrapper):
             truncs = list(truncs.values())
             remote.send((ob, reward, dones, truncs, info))
         elif cmd == "reset":
-            ob, infos = env.reset(seed=data, options=None)
+            ob, infos = env.reset(seed=data[0], options=data[1])
             ob = list(ob.values())
             infos = list(infos.values())
             remote.send((ob, infos))
@@ -229,7 +229,7 @@ class SubprocVecEnv(VecEnv):
 
     def reset(self, seed=None, options=None):
         for remote in self.remotes:
-            remote.send(("reset", seed))
+            remote.send(("reset", [seed, options]))
         results = [remote.recv() for remote in self.remotes]
         obs, infos = zip(*results)
         ret_obs_dict = {
