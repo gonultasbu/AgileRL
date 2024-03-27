@@ -422,7 +422,9 @@ class MATD3:
         # states = {key: np.vstack(value) for key, value in states.items()}
 
         # Convert states to a list of torch tensors
-        states = [torch.from_numpy(state).float() for state in states.values()]
+        states = [
+            torch.from_numpy(np.stack(state)).float() for state in states.values()
+        ]
 
         # Configure accelerator
         if self.accelerator is None:

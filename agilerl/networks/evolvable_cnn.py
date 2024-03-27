@@ -99,6 +99,11 @@ class EvolvableCNN(nn.Module):
         device="cpu",
         accelerator=None,
         arch="cnn",
+        mixed_input=False,
+        mixed_input_second_size=0,
+        pooling=False,
+        instance_norm=False,
+        output_vanish=False,
     ):
         super().__init__()
         assert len(kernel_size) == len(
@@ -111,17 +116,19 @@ class EvolvableCNN(nn.Module):
         assert (
             len(hidden_size) > 0
         ), "Fully connected layer must contain at least one hidden layer."
-        assert (
-            num_actions > 0
-        ), "'num_actions' cannot be less than or equal to zero, please enter a valid integer."
+        assert num_actions > 0, (
+            "'num_actions' cannot be less than or equal to zero, please enter a valid"
+            " integer."
+        )
         if multi:
             assert (
                 n_agents is not None
             ), "'multi' set as True, specify the number of agents (n_agents) too."
         if n_agents is not None:
-            assert (
-                multi
-            ), f"'n_agents' has been set to {n_agents} implying a multi-agent system, please also specify 'multi' as True."
+            assert multi, (
+                f"'n_agents' has been set to {n_agents} implying a multi-agent system,"
+                " please also specify 'multi' as True."
+            )
 
         assert (
             min_hidden_layers < max_hidden_layers
@@ -184,6 +191,11 @@ class EvolvableCNN(nn.Module):
             "max_mlp_nodes": self.max_mlp_nodes,
         }
 
+        self.mixed_input = mixed_input
+        self.mixed_input_second_size = mixed_input_second_size
+        self.pooling = pooling
+        self.instance_norm = instance_norm
+        self.output_vanish = output_vanish
         self.net = self.create_nets()
         self.feature_net, self.value_net, self.advantage_net = self.create_nets()
 
@@ -256,6 +268,10 @@ class EvolvableCNN(nn.Module):
             output_layer = NoisyLinear(hidden_size[-1], output_size)
         else:
             output_layer = nn.Linear(hidden_size[-1], output_size)
+
+        if self.output_vanish:
+            output_layer.weight.data.mul_(0.1)
+            output_layer.bias.data.mul_(0.1)
         net_dict[f"{name}_linear_layer_output"] = output_layer
         if output_activation is not None:
             net_dict[f"{name}_activation_output"] = self.get_activation(
@@ -290,7 +306,11 @@ class EvolvableCNN(nn.Module):
             if self.layer_norm:
                 net_dict[f"{name}_layer_norm_0"] = nn.BatchNorm3d(channel_size[0])
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
-
+            if self.pooling:
+                net_dict[f"{name}_pooling_0"] = nn.MaxPool3d(
+                    kernel_size=(1, 2, 2),
+                    stride=2,
+                )
             if len(channel_size) > 1:
                 for l_no in range(1, len(channel_size)):
                     k_size = (1, kernel_size[l_no], kernel_size[l_no])
@@ -304,6 +324,14 @@ class EvolvableCNN(nn.Module):
                         net_dict[f"{name}_layer_norm_{str(l_no)}"] = nn.BatchNorm3d(
                             channel_size[l_no]
                         )
+                    if self.pooling:
+                        net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
+                            kernel_size=(1, 5, 5), stride=5
+                        )
+                    if self.instance_norm:
+                        net_dict[
+                            f"{name}_instance_norm_{str(l_no)}"
+                        ] = nn.InstanceNorm3d(num_features=channel_size[l_no])
                     net_dict[f"{name}_activation_{str(l_no)}"] = self.get_activation(
                         self.cnn_activation
                     )
@@ -389,6 +417,8 @@ class EvolvableCNN(nn.Module):
 
         if self.critic:
             input_size += self.num_actions
+        if self.mixed_input:
+            input_size += self.mixed_input_second_size
 
         if self.rainbow:
             value_net = self.create_mlp(
@@ -476,11 +506,12 @@ class EvolvableCNN(nn.Module):
 
         if self.normalize:
             x = x / 255.0
-
+        # if self.mixed_input:
+        #     x = torch.zeros(([batch_size, 4]), device=self.device, dtype=torch.float32)
+        # else:
         x = self.feature_net(x)
         x = x.reshape(batch_size, -1)
-
-        if self.critic:
+        if self.critic or self.mixed_input:
             x = torch.cat([x, xc], dim=1)
 
         value = self.value_net(x)
@@ -536,6 +567,11 @@ class EvolvableCNN(nn.Module):
             "rainbow": self.rainbow,
             "device": self.device,
             "accelerator": self.accelerator,
+            "mixed_input": self.mixed_input,
+            "mixed_input_second_size": self.mixed_input_second_size,
+            "pooling": self.pooling,
+            "instance_norm": self.instance_norm,
+            "output_vanish": self.output_vanish,
         }
         return init_dict
 
