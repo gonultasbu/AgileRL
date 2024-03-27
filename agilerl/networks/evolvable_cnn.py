@@ -308,7 +308,7 @@ class EvolvableCNN(nn.Module):
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
             if self.pooling:
                 net_dict[f"{name}_pooling_0"] = nn.MaxPool3d(
-                    kernel_size=(1, 2, 2),
+                    kernel_size=(1, 3, 3),
                     stride=2,
                 )
             if len(channel_size) > 1:
@@ -326,7 +326,7 @@ class EvolvableCNN(nn.Module):
                         )
                     if self.pooling:
                         net_dict[f"{name}_pooling_{str(l_no)}"] = nn.MaxPool3d(
-                            kernel_size=(1, 5, 5), stride=5
+                            kernel_size=(1, 3, 3), stride=2
                         )
                     if self.instance_norm:
                         net_dict[
@@ -345,6 +345,8 @@ class EvolvableCNN(nn.Module):
             )
             if self.layer_norm:
                 net_dict[f"{name}_layer_norm_0"] = nn.BatchNorm2d(channel_size[0])
+            # if self.pooling:
+            #     net_dict[f"{name}_pooling_0"] = nn.MaxPool2d(kernel_size=2, stride=2)
             net_dict[f"{name}_activation_0"] = self.get_activation(self.cnn_activation)
 
             if len(channel_size) > 1:
@@ -506,9 +508,11 @@ class EvolvableCNN(nn.Module):
 
         if self.normalize:
             x = x / 255.0
-
-        x = self.feature_net(x)
-        x = x.reshape(batch_size, -1)
+        if self.mixed_input:
+            x = torch.zeros(([batch_size, 4]), device=self.device, dtype=torch.float32)
+        else:
+            x = self.feature_net(x)
+            x = x.reshape(batch_size, -1)
         if self.critic or self.mixed_input:
             x = torch.cat([x, xc], dim=1)
 
