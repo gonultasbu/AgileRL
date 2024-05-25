@@ -183,9 +183,7 @@ class DDPG:
                 self.actor_network = actor_network
                 self.critic_network = critic_network
             else:
-                assert (
-                    False
-                ), f"'actor_network' argument is of type {type(actor_network)} and 'critic_network' of type {type(critic_network)}, \
+                assert False, f"'actor_network' argument is of type {type(actor_network)} and 'critic_network' of type {type(critic_network)}, \
                                 both must be the same type and be of type EvolvableMLP, EvolvableCNN or MakeEvolvable"
 
         else:
@@ -469,27 +467,27 @@ class DDPG:
         """
         with torch.no_grad():
             rewards = []
-            num_envs = env.num_envs if hasattr(env, "num_envs") else 1
             for i in range(loop):
-                state, _ = env.reset()
-                scores = np.zeros(num_envs)
-                completed_episode_scores = []
-                finished = np.zeros(num_envs)
-                step = 0
-                while not np.all(finished):
+                state = env.reset()
+                score = 0
+                finished = False
+                for step in range(max_steps):
                     if swap_channels:
+                        if not hasattr(env, "num_envs"):
+                            state = np.expand_dims(state, 0)
                         state = np.moveaxis(state, [-1], [-3])
                     action = self.getAction(state, epsilon=0)
-                    state, reward, done, trunc, _ = env.step(action)
-                    step += 1
-                    scores += np.array(reward)
-                    for idx, (d, t) in enumerate(zip(done, trunc)):
-                        if d:
-                            completed_episode_scores.append(scores[idx])
-                        if d or t or (max_steps is not None and step == max_steps):
-                            scores[idx] = 0
-                            finished[idx] = 1
-                rewards.append(np.mean(completed_episode_scores))
+                    if not hasattr(env, "num_envs"):
+                        action = action[0]
+                    state, reward, done, info = env.step(action.squeeze())
+                    if hasattr(env, "num_envs"):
+                        done = done[0]
+                        # trunc = trunc[0]
+                        reward = reward[0]
+                    score += reward
+                    if done:
+                        finished = True
+                rewards.append(score)
         mean_fit = np.mean(rewards)
         self.fitness.append(mean_fit)
         return mean_fit
