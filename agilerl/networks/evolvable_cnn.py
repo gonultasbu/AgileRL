@@ -122,9 +122,7 @@ class EvolvableCNN(nn.Module):
                 n_agents is not None
             ), "'multi' set as True, specify the number of agents (n_agents) too."
         if n_agents is not None:
-            assert (
-                multi
-            ), f"'n_agents' has been set to {n_agents} implying a multi-agent system, please also specify 'multi' as True."
+            assert multi, f"'n_agents' has been set to {n_agents} implying a multi-agent system, please also specify 'multi' as True."
 
         assert (
             min_hidden_layers < max_hidden_layers
@@ -237,9 +235,14 @@ class EvolvableCNN(nn.Module):
         else:
             net_dict[f"{name}_linear_layer_0"] = nn.Linear(input_size, hidden_size[0])
         if self.init_layers:
-            net_dict[f"{name}_linear_layer_0"] = self.layer_init(
-                net_dict[f"{name}_linear_layer_0"]
-            )
+            if len(hidden_size) == 1:
+                net_dict[f"{name}_linear_layer_0"] = self.layer_init_uniform(
+                    net_dict[f"{name}_linear_layer_0"]
+                )
+            else:
+                net_dict[f"{name}_linear_layer_0"] = self.layer_init(
+                    net_dict[f"{name}_linear_layer_0"]
+                )
         if self.layer_norm:
             net_dict[f"{name}_layer_norm_0"] = nn.LayerNorm(hidden_size[0])
         net_dict["activation_0"] = self.get_activation(self.mlp_activation)
@@ -254,9 +257,16 @@ class EvolvableCNN(nn.Module):
                         hidden_size[l_no - 1], hidden_size[l_no]
                     )
                 if self.init_layers:
-                    net_dict[f"{name}_linear_layer_{str(l_no)}"] = self.layer_init(
-                        net_dict[f"{name}_linear_layer_{str(l_no)}"]
-                    )
+                    if l_no == (len(hidden_size) - 1):
+                        net_dict[f"{name}_linear_layer_{str(l_no)}"] = (
+                            self.layer_init_uniform(
+                                net_dict[f"{name}_linear_layer_{str(l_no)}"]
+                            )
+                        )
+                    else:
+                        net_dict[f"{name}_linear_layer_{str(l_no)}"] = self.layer_init(
+                            net_dict[f"{name}_linear_layer_{str(l_no)}"]
+                        )
                 if self.layer_norm:
                     net_dict[f"{name}_layer_norm_{str(l_no)}"] = nn.LayerNorm(
                         hidden_size[l_no]
@@ -468,9 +478,7 @@ class EvolvableCNN(nn.Module):
                 (
                     feature_net,
                     value_net,
-                ) = feature_net.to(
-                    self.device
-                ), value_net.to(self.device)
+                ) = feature_net.to(self.device), value_net.to(self.device)
 
         self.cnn_output_size = cnn_output.shape
 
@@ -488,6 +496,11 @@ class EvolvableCNN(nn.Module):
 
     def layer_init(self, layer, std=np.sqrt(2), bias_const=0.0):
         torch.nn.init.orthogonal_(layer.weight, std)
+        torch.nn.init.constant_(layer.bias, bias_const)
+        return layer
+
+    def layer_init_uniform(self, layer, a=-3e-4, b=3e-4, bias_const=0.0):
+        torch.nn.init.uniform_(layer.weight, a, b)
         torch.nn.init.constant_(layer.bias, bias_const)
         return layer
 
@@ -689,11 +702,15 @@ class EvolvableCNN(nn.Module):
         max_kernel_list = []
         height_in, width_in = input_shape[-2:]
         for idx, _ in enumerate(channel_size):
-            height_out = 1 + (height_in + 2 * 0 - 1 * (kernel_size[idx] - 1) - 1) / (
-                stride_size[idx]
+            height_out = (
+                1
+                + (height_in + 2 * 0 - 1 * (kernel_size[idx] - 1) - 1)
+                / (stride_size[idx])
             )
-            width_out = 1 + (width_in + 2 * (0) - 1 * (kernel_size[idx] - 1) - 1) / (
-                stride_size[idx]
+            width_out = (
+                1
+                + (width_in + 2 * (0) - 1 * (kernel_size[idx] - 1) - 1)
+                / (stride_size[idx])
             )
             max_kernel_size = min(height_out, width_out) * 0.25
             if max_kernel_size < 0:
