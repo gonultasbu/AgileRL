@@ -138,7 +138,8 @@ class MADDPG:
             ), "Critic networks must be an nn.Module or None."
         if (actor_networks is not None) != (critic_networks is not None):
             warnings.warn(
-                "Actor and critic network lists must both be supplied to use custom networks. Defaulting to net config."
+                "Actor and critic network lists must both be supplied to use custom"
+                " networks. Defaulting to net config."
             )
         assert isinstance(
             wrap, bool
@@ -359,12 +360,29 @@ class MADDPG:
         # states = {key: np.vstack(value) for key, value in states.items()}
 
         # Convert states to a list of torch tensors
-        states = [torch.from_numpy(state).float() for state in states.values()]
+        if self.arch == "mlp" or self.arch == "cnn":
+            states = [
+                torch.from_numpy(np.stack(state)).float() for state in states.values()
+            ]
 
-        # Configure accelerator
-        if self.accelerator is None:
-            states = [state.to(self.device) for state in states]
+            # Configure accelerator
+            if self.accelerator is None:
+                states = [state.to(self.device) for state in states]
 
+        elif self.arch == "mixed":
+            im_states = []
+            vec_states = []
+            for state in states.values():
+                im_states.append(
+                    torch.from_numpy(np.stack([s_2[0] for s_2 in state]))
+                    .float()
+                    .to(self.device)
+                )
+                vec_states.append(
+                    torch.from_numpy(np.stack([s_2[1] for s_2 in state]))
+                    .float()
+                    .to(self.device)
+                )
         if self.one_hot:
             states = [
                 nn.functional.one_hot(state.long(), num_classes=state_dim[0])
@@ -381,13 +399,28 @@ class MADDPG:
         elif self.arch == "cnn":
             states = [state.unsqueeze(2) for state in states]
 
+        elif self.arch == "mixed":
+            for idx, im_state in enumerate(im_states):
+                im_states[idx] = im_state.unsqueeze(2)
+                vec_states[idx] = (
+                    vec_states[idx].unsqueeze(0)
+                    if len(vec_states[idx].size()) < 2
+                    else vec_states[idx]
+                )
+            states = [
+                [im_states[idx], vec_states[idx]] for idx in range(len(im_states))
+            ]
         action_dict = {}
         for idx, (agent_id, state, actor) in enumerate(zip(agent_ids, states, actors)):
             if random.random() < epsilon:
+                if self.arch == "mixed":
+                    state_size_dim = state[0].size()[0]
+                else:
+                    state_size_dim = state.size()[0]
                 if self.discrete_actions:
                     action = (
                         np.random.dirichlet(
-                            np.ones(self.action_dims[idx]), state.size()[0]
+                            np.ones(self.action_dims[idx]), state_size_dim
                         )
                         .astype("float32")
                         .squeeze()
@@ -395,18 +428,26 @@ class MADDPG:
                 else:
                     action = (
                         (self.max_action[idx][0] - self.min_action[idx][0])
-                        * np.random.rand(state.size()[0], self.action_dims[idx])
+                        * np.random.rand(state_size_dim, self.action_dims[idx])
                         .astype("float32")
                         .squeeze()
                     ) + self.min_action[idx][0]
             else:
                 actor.eval()
-                if self.accelerator is not None:
-                    with actor.no_sync(), torch.no_grad():
-                        action_values = actor(state)
+                if self.arch == "mixed":
+                    if self.accelerator is not None:
+                        with actor.no_sync(), torch.no_grad():
+                            action_values = actor(state[0], state[1])
+                    else:
+                        with torch.no_grad():
+                            action_values = actor(state[0], state[1])
                 else:
-                    with torch.no_grad():
-                        action_values = actor(state)
+                    if self.accelerator is not None:
+                        with actor.no_sync(), torch.no_grad():
+                            action_values = actor(state)
+                    else:
+                        with torch.no_grad():
+                            action_values = actor(state)
                 actor.train()
                 if self.discrete_actions:
                     action = action_values.cpu().data.numpy().squeeze()
@@ -482,7 +523,18 @@ class MADDPG:
                 self.critic_optimizers,
             )
         ):
-            states, actions, rewards, next_states, dones = experiences
+            if self.arch == "mixed":
+                (
+                    im_states,
+                    vec_states,
+                    actions,
+                    rewards,
+                    next_im_states,
+                    next_vec_states,
+                    dones,
+                ) = experiences
+            else:
+                states, actions, rewards, next_states, dones = experiences
 
             if self.one_hot:
                 states = {
@@ -552,6 +604,37 @@ class MADDPG:
                     else:
                         next_actions.append(unscaled_actions)
 
+            elif self.arch == "mixed":
+                stacked_ims = torch.stack(list(im_states.values()), dim=2)
+                stacked_vecs = torch.cat(list(vec_states.values()), dim=1)
+                stacked_actions = torch.cat(list(actions.values()), dim=1)
+                if self.accelerator is not None:
+                    with critic.no_sync():
+                        q_value = critic(
+                            stacked_ims,
+                            torch.cat((stacked_vecs, stacked_actions), dim=1),
+                        )
+                else:
+                    q_value = critic(
+                        stacked_ims,
+                        torch.cat((stacked_vecs, stacked_actions), dim=1),
+                    )
+                next_actions = []
+                for i, agent_id_label in enumerate(self.agent_ids):
+                    unscaled_actions = self.actor_targets[i](
+                        next_im_states[agent_id_label].unsqueeze(2),
+                        next_vec_states[agent_id_label],
+                    ).detach_()
+                    if not self.discrete_actions:
+                        scaled_actions = torch.where(
+                            unscaled_actions > 0,
+                            unscaled_actions * self.max_action[i][0],
+                            unscaled_actions * -self.min_action[i][0],
+                        )
+                        next_actions.append(scaled_actions)
+                    else:
+                        next_actions.append(unscaled_actions)
+
             if self.arch == "mlp":
                 next_input_combined = torch.cat(
                     list(next_states.values()) + next_actions, 1
@@ -561,6 +644,7 @@ class MADDPG:
                         q_value_next_state = critic_target(next_input_combined)
                 else:
                     q_value_next_state = critic_target(next_input_combined)
+
             elif self.arch == "cnn":
                 stacked_next_states = torch.stack(list(next_states.values()), dim=2)
                 stacked_next_actions = torch.cat(next_actions, dim=1)
@@ -574,6 +658,21 @@ class MADDPG:
                         stacked_next_states, stacked_next_actions
                     )
 
+            elif self.arch == "mixed":
+                stacked_next_ims = torch.stack(list(next_im_states.values()), dim=2)
+                stacked_next_vecs = torch.cat(list(next_vec_states.values()), dim=1)
+                stacked_next_actions = torch.cat(next_actions, dim=1)
+                if self.accelerator is not None:
+                    with critic_target.no_sync():
+                        q_value_next_state = critic_target(
+                            stacked_next_ims,
+                            torch.cat((stacked_next_vecs, stacked_next_actions), dim=1),
+                        )
+                else:
+                    q_value_next_state = critic_target(
+                        stacked_next_ims,
+                        torch.cat((stacked_next_vecs, stacked_next_actions), dim=1),
+                    )
             y_j = (
                 rewards[agent_id]
                 + (1 - dones[agent_id]) * self.gamma * q_value_next_state
@@ -640,6 +739,40 @@ class MADDPG:
                         stacked_states, stacked_detached_actions
                     ).mean()
 
+            elif self.arch == "mixed":
+                if self.accelerator is not None:
+                    with actor.no_sync():
+                        action = actor(
+                            im_states[agent_id].unsqueeze(2),
+                            vec_states[agent_id],
+                        )
+                else:
+                    action = actor(
+                        im_states[agent_id].unsqueeze(2),
+                        vec_states[agent_id],
+                    )
+                if not self.discrete_actions:
+                    action = torch.where(
+                        action > 0,
+                        action * self.max_action[idx][0],
+                        action * -self.min_action[idx][0],
+                    )
+                detached_actions = copy.deepcopy(actions)
+                detached_actions[agent_id] = action
+                stacked_detached_actions = torch.cat(
+                    list(detached_actions.values()), dim=1
+                )
+                if self.accelerator is not None:
+                    with critic.no_sync():
+                        actor_loss = -critic(
+                            stacked_ims,
+                            torch.cat((stacked_vecs, stacked_detached_actions), dim=1),
+                        ).mean()
+                else:
+                    actor_loss = -critic(
+                        stacked_ims,
+                        torch.cat((stacked_vecs, stacked_detached_actions), dim=1),
+                    ).mean()
             # actor loss backprop
             actor_optimizer.zero_grad()
             if self.accelerator is not None:
@@ -654,7 +787,8 @@ class MADDPG:
             self.softUpdate(actor, actor_target)
             self.softUpdate(critic, critic_target)
 
-        return actor_loss.item(), critic_loss.item()
+        # return actor_loss.item(), critic_loss.item()
+        return
 
     def softUpdate(self, net, target):
         """Soft updates target network."""
@@ -931,7 +1065,7 @@ class MADDPG:
             pickle_module=dill,
         )
 
-    def loadCheckpoint(self, path):
+    def loadCheckpoint(self, path, mixed=False):
         """Loads saved agent properties and network weights from checkpoint.
 
         :param path: Location to load checkpoint from
@@ -939,7 +1073,26 @@ class MADDPG:
         """
         checkpoint = torch.load(path, pickle_module=dill)
         self.net_config = checkpoint["net_config"]
-        if self.net_config is not None:
+
+        if mixed:
+            self.actors = [
+                EvolvableCNN(**checkpoint["actors_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+            self.actor_targets = [
+                EvolvableCNN(**checkpoint["actor_targets_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+            self.critics = [
+                EvolvableCNN(**checkpoint["critics_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+            self.critic_targets = [
+                EvolvableCNN(**checkpoint["critic_targets_init_dict"][idx])
+                for idx, _ in enumerate(self.agent_ids)
+            ]
+
+        elif self.net_config is not None:
             self.arch = checkpoint["net_config"]["arch"]
             if self.arch == "mlp":
                 self.actors = [

@@ -85,9 +85,10 @@ class MakeEvolvable(nn.Module):
                 network, nn.Module
             ), f"'network' must be of type 'nn.Module'.{type(network)}"
         if secondary_input_tensor is not None:
-            assert (
-                extra_critic_dims is not None
-            ), "Must add extra critic dimensions, equal to the sum of all agents action dims."
+            assert extra_critic_dims is not None, (
+                "Must add extra critic dimensions, equal to the sum of all agents"
+                " action dims."
+            )
             assert isinstance(
                 extra_critic_dims, int
             ), "Extra critic dimensions must be an integer."
@@ -112,12 +113,22 @@ class MakeEvolvable(nn.Module):
 
         # Set placeholder attributes (needed for init_dict function to work)
         self.has_conv_layers = False
-        self.input_tensor = input_tensor.to(self.device)
-        self.secondary_input_tensor = (
-            secondary_input_tensor.to(self.device)
-            if secondary_input_tensor is not None
-            else secondary_input_tensor
-        )
+        if isinstance(input_tensor, torch.Tensor):
+            self.input_tensor = input_tensor.to(self.device)
+        elif isinstance(input_tensor, dict):
+            self.input_tensor = {
+                key: value.to(self.device) for key, value in input_tensor.items()
+            }
+        if secondary_input_tensor is not None:
+            if isinstance(secondary_input_tensor, torch.Tensor):
+                self.secondary_input_tensor = secondary_input_tensor.to(self.device)
+            elif isinstance(secondary_input_tensor, dict):
+                self.secondary_input_tensor = {
+                    key: value.to(self.device)
+                    for key, value in secondary_input_tensor.items()
+                }
+        else:
+            self.secondary_input_tensor = secondary_input_tensor
         (
             self.in_channels,
             self.channel_size,
@@ -443,7 +454,8 @@ class MakeEvolvable(nn.Module):
             activation_function_set.remove(self.mlp_output_activation)
         if len(activation_function_set) > 1:
             raise TypeError(
-                "All activation functions other than the output layer activation must be the same."
+                "All activation functions other than the output layer activation must"
+                " be the same."
             )
         else:
             self.mlp_activation = list(mlp_layer_info["activation_layers"].values())[0]
