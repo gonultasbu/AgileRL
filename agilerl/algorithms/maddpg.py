@@ -13,6 +13,7 @@ from agilerl.networks.evolvable_mlp import EvolvableMLP
 from agilerl.utils.algo_utils import unwrap_optimizer
 from agilerl.wrappers.make_evolvable import MakeEvolvable
 from agilerl.wrappers.pettingzoo_wrappers import PettingZooVectorizationParallelWrapper
+from prodigyopt import Prodigy
 
 
 class MADDPG:
@@ -232,12 +233,9 @@ class MADDPG:
             ):
                 self.net_config = None
             else:
-                assert (
-                    False
-                ), "'actor_networks' and 'critic_networks' must be lists of networks all of which must be the same  \
+                assert False, "'actor_networks' and 'critic_networks' must be lists of networks all of which must be the same  \
                                 type and be of type EvolvableMLP, EvolvableCNN or MakeEvolvable"
         else:
-
             # model
             if self.net_config["arch"] == "mlp":  # Multi-layer Perceptron
                 self.actors = []
@@ -263,9 +261,9 @@ class MADDPG:
                         )
                     )
                 critic_net_config = copy.deepcopy(self.net_config)
-                critic_net_config["mlp_output_activation"] = (
-                    None  # Critic must have no output activation
-                )
+                critic_net_config[
+                    "mlp_output_activation"
+                ] = None  # Critic must have no output activation
                 self.critics = [
                     EvolvableMLP(
                         num_inputs=self.total_state_dims + self.total_actions,
@@ -302,9 +300,9 @@ class MADDPG:
                         )
                     )
                 critic_net_config = copy.deepcopy(self.net_config)
-                critic_net_config["mlp_output_activation"] = (
-                    None  # Critic must have no output activation
-                )
+                critic_net_config[
+                    "mlp_output_activation"
+                ] = None  # Critic must have no output activation
                 self.critics = [
                     EvolvableCNN(
                         input_shape=state_dim,
@@ -337,11 +335,10 @@ class MADDPG:
             critic_target.load_state_dict(critic.state_dict())
 
         self.actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=self.lr_actor) for actor in self.actors
+            Prodigy(actor.parameters(), lr=self.lr_actor) for actor in self.actors
         ]
         self.critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=self.lr_critic)
-            for critic in self.critics
+            Prodigy(critic.parameters(), lr=self.lr_critic) for critic in self.critics
         ]
 
         if self.accelerator is not None:
@@ -845,10 +842,10 @@ class MADDPG:
             critic_target.clone() for critic_target in self.critic_targets
         ]
         actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=clone.lr_actor) for actor in actors
+            Prodigy(actor.parameters(), lr=clone.lr_actor) for actor in actors
         ]
         critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=clone.lr_critic) for critic in critics
+            Prodigy(critic.parameters(), lr=clone.lr_critic) for critic in critics
         ]
 
         for (
@@ -1014,7 +1011,7 @@ class MADDPG:
             ]
             self.actor_optimizers = [
                 unwrap_optimizer(actor_optimizer, actor, self.lr_actor)
-                for actor_optimizer, actor, in zip(self.actor_optimizers, self.actors)
+                for actor_optimizer, actor in zip(self.actor_optimizers, self.actors)
             ]
             self.critic_optimizers = [
                 unwrap_optimizer(critic_optimizer, critic, self.lr_critic)
@@ -1118,11 +1115,10 @@ class MADDPG:
         self.lr_actor = checkpoint["lr_actor"]
         self.lr_critic = checkpoint["lr_critic"]
         self.actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=self.lr_actor) for actor in self.actors
+            Prodigy(actor.parameters(), lr=self.lr_actor) for actor in self.actors
         ]
         self.critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=self.lr_critic)
-            for critic in self.critics
+            Prodigy(critic.parameters(), lr=self.lr_critic) for critic in self.critics
         ]
         actor_list = []
         critic_list = []
@@ -1270,11 +1266,10 @@ class MADDPG:
             ]
 
         agent.actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=agent.lr_actor) for actor in agent.actors
+            Prodigy(actor.parameters(), lr=agent.lr_actor) for actor in agent.actors
         ]
         agent.critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=agent.lr_critic)
-            for critic in agent.critics
+            Prodigy(critic.parameters(), lr=agent.lr_critic) for critic in agent.critics
         ]
 
         actor_list = []
