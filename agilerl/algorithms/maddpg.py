@@ -232,12 +232,9 @@ class MADDPG:
             ):
                 self.net_config = None
             else:
-                assert (
-                    False
-                ), "'actor_networks' and 'critic_networks' must be lists of networks all of which must be the same  \
+                assert False, "'actor_networks' and 'critic_networks' must be lists of networks all of which must be the same  \
                                 type and be of type EvolvableMLP, EvolvableCNN or MakeEvolvable"
         else:
-
             # model
             if self.net_config["arch"] == "mlp":  # Multi-layer Perceptron
                 self.actors = []
@@ -337,10 +334,10 @@ class MADDPG:
             critic_target.load_state_dict(critic.state_dict())
 
         self.actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=self.lr_actor) for actor in self.actors
+            optim.RMSprop(actor.parameters(), lr=self.lr_actor) for actor in self.actors
         ]
         self.critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=self.lr_critic)
+            optim.RMSprop(critic.parameters(), lr=self.lr_critic)
             for critic in self.critics
         ]
 
@@ -845,10 +842,10 @@ class MADDPG:
             critic_target.clone() for critic_target in self.critic_targets
         ]
         actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=clone.lr_actor) for actor in actors
+            optim.RMSprop(actor.parameters(), lr=clone.lr_actor) for actor in actors
         ]
         critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=clone.lr_critic) for critic in critics
+            optim.RMSprop(critic.parameters(), lr=clone.lr_critic) for critic in critics
         ]
 
         for (
@@ -1014,7 +1011,7 @@ class MADDPG:
             ]
             self.actor_optimizers = [
                 unwrap_optimizer(actor_optimizer, actor, self.lr_actor)
-                for actor_optimizer, actor, in zip(self.actor_optimizers, self.actors)
+                for actor_optimizer, actor in zip(self.actor_optimizers, self.actors)
             ]
             self.critic_optimizers = [
                 unwrap_optimizer(critic_optimizer, critic, self.lr_critic)
@@ -1118,10 +1115,10 @@ class MADDPG:
         self.lr_actor = checkpoint["lr_actor"]
         self.lr_critic = checkpoint["lr_critic"]
         self.actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=self.lr_actor) for actor in self.actors
+            optim.RMSprop(actor.parameters(), lr=self.lr_actor) for actor in self.actors
         ]
         self.critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=self.lr_critic)
+            optim.RMSprop(critic.parameters(), lr=self.lr_critic)
             for critic in self.critics
         ]
         actor_list = []
@@ -1270,10 +1267,11 @@ class MADDPG:
             ]
 
         agent.actor_optimizers = [
-            optim.Adam(actor.parameters(), lr=agent.lr_actor) for actor in agent.actors
+            optim.RMSprop(actor.parameters(), lr=agent.lr_actor)
+            for actor in agent.actors
         ]
         agent.critic_optimizers = [
-            optim.Adam(critic.parameters(), lr=agent.lr_critic)
+            optim.RMSprop(critic.parameters(), lr=agent.lr_critic)
             for critic in agent.critics
         ]
 
