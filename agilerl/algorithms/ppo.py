@@ -1,5 +1,6 @@
 import copy
 import inspect
+import math
 
 import dill
 import numpy as np
@@ -227,11 +228,10 @@ class PPO:
 
         # For continuous action spaces
         if not self.discrete_actions:
-            self.action_var = torch.full((action_dim,), action_std_init**2)
-            if self.accelerator is None:
-                self.action_var = self.action_var.to(self.device)
-            else:
-                self.action_var = self.action_var.to(self.accelerator.device)
+            device = self.device if self.accelerator is None else self.accelerator.device
+            self.log_std = nn.Parameter(
+                torch.full((action_dim,), math.log(action_std_init), device=device)
+            )
 
         if self.actor_network is not None and self.critic_network is not None:
             assert type(actor_network) is type(
@@ -342,12 +342,13 @@ class PPO:
             self.net_config["arch"] if self.net_config is not None else self.actor.arch
         )
 
-        self.optimizer = optim.Adam(
-            [
-                {"params": self.actor.parameters(), "lr": self.lr},
-                {"params": self.critic.parameters(), "lr": self.lr},
-            ]
-        )
+        optimizer_params = [
+            {"params": self.actor.parameters(), "lr": self.lr},
+            {"params": self.critic.parameters(), "lr": self.lr},
+        ]
+        if not self.discrete_actions:
+            optimizer_params.append({"params": [self.log_std], "lr": self.lr})
+        self.optimizer = optim.Adam(optimizer_params)
 
         if self.accelerator is not None:
             if wrap:
@@ -461,7 +462,7 @@ class PPO:
                 action_values *= action_mask
             dist = Categorical(action_values)
         else:
-            cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+            cov_mat = torch.diag(self.log_std.exp() ** 2).unsqueeze(dim=0)
             dist = MultivariateNormal(action_values, cov_mat)
 
         return_tensors = True
@@ -631,6 +632,10 @@ class PPO:
                         loss.backward()
                     clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
                     self.optimizer.step()
+
+                    if not self.discrete_actions:
+                        with torch.no_grad():
+                            self.log_std.clamp_(min=-5.0, max=0.5)
 
                     mean_loss += loss.item()
 
@@ -844,15 +849,32 @@ class PPO:
         self.actor = network_class(**checkpoint["actor_init_dict"])
         self.critic = network_class(**checkpoint["critic_init_dict"])
         self.lr = checkpoint["lr"]
-        self.optimizer = optim.Adam(
-            [
-                {"params": self.actor.parameters(), "lr": self.lr},
-                {"params": self.critic.parameters(), "lr": self.lr},
-            ]
-        )
+        optimizer_params = [
+            {"params": self.actor.parameters(), "lr": self.lr},
+            {"params": self.critic.parameters(), "lr": self.lr},
+        ]
+        if not self.discrete_actions:
+            optimizer_params.append({"params": [self.log_std], "lr": self.lr})
+        self.optimizer = optim.Adam(optimizer_params)
         self.actor.load_state_dict(checkpoint["actor_state_dict"])
         self.critic.load_state_dict(checkpoint["critic_state_dict"])
-        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        # Migrate old checkpoints that used fixed action_var instead of learnable log_std
+        old_checkpoint = "action_var" in checkpoint and "log_std" not in checkpoint
+        if old_checkpoint and not self.discrete_actions:
+            action_var = checkpoint.pop("action_var")
+            self.log_std = nn.Parameter(
+                torch.log(torch.sqrt(action_var)).to(self.log_std.device)
+            )
+            # Rebuild optimizer with new log_std param (old state_dict is incompatible)
+            optimizer_params = [
+                {"params": self.actor.parameters(), "lr": self.lr},
+                {"params": self.critic.parameters(), "lr": self.lr},
+                {"params": [self.log_std], "lr": self.lr},
+            ]
+            self.optimizer = optim.Adam(optimizer_params)
+        else:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         for attribute in checkpoint.keys():
             if attribute not in network_info:
@@ -914,13 +936,23 @@ class PPO:
 
         agent.actor.load_state_dict(actor_state_dict)
         agent.critic.load_state_dict(critic_state_dict)
-        agent.optimizer = optim.Adam(
-            [
-                {"params": agent.actor.parameters(), "lr": agent.lr},
-                {"params": agent.critic.parameters(), "lr": agent.lr},
-            ]
-        )
-        agent.optimizer.load_state_dict(optimizer_state_dict)
+
+        # Migrate old checkpoints that used fixed action_var instead of learnable log_std
+        old_checkpoint = "action_var" in checkpoint and "log_std" not in checkpoint
+        optimizer_params = [
+            {"params": agent.actor.parameters(), "lr": agent.lr},
+            {"params": agent.critic.parameters(), "lr": agent.lr},
+        ]
+        if not agent.discrete_actions:
+            if old_checkpoint:
+                action_var = checkpoint.pop("action_var")
+                agent.log_std = nn.Parameter(
+                    torch.log(torch.sqrt(action_var)).to(device)
+                )
+            optimizer_params.append({"params": [agent.log_std], "lr": agent.lr})
+        agent.optimizer = optim.Adam(optimizer_params)
+        if not old_checkpoint:
+            agent.optimizer.load_state_dict(optimizer_state_dict)
 
         if accelerator is not None:
             agent.wrap_models()
